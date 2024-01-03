@@ -6,47 +6,31 @@
 
 void perform_search(std::string &pattern, std::string_view path,
                     argparse::ArgumentParser &program) {
-  if (!isatty(fileno(stdin))) {
-    // Program was called from a pipe
-
-    file_search s(pattern, program);
-    std::string line;
-    std::size_t current_line_number{1};
-    while (std::getline(std::cin, line)) {
-      // Process line here
-      bool break_loop{false};
-      s.scan_line(line, current_line_number, break_loop);
-      if (break_loop) {
-        break;
-      }
-    }
+  if (std::filesystem::is_regular_file(path)) {
+    static file_search s(pattern, program);
+    s.run(path);
   } else {
-    if (std::filesystem::is_regular_file(path)) {
-      static file_search s(pattern, program);
+
+    const auto ignore_gitindex = program.get<bool>("--ignore-gitindex");
+    if (ignore_gitindex) {
+      // Just run directory search
+      static directory_search s(pattern, path, program);
       s.run(path);
     } else {
+      // Check if search path is a git repo
+      const auto current_path = std::filesystem::current_path();
 
-      const auto ignore_gitindex = program.get<bool>("--ignore-gitindex");
-      if (ignore_gitindex) {
-        // Just run directory search
-        static directory_search s(pattern, path, program);
-        s.run(path);
-      } else {
-        // Check if search path is a git repo
-        const auto current_path = std::filesystem::current_path();
-
-        if (std::filesystem::exists(std::filesystem::path(path) / ".git")) {
-          if (chdir(path.data()) == 0) {
-            static git_index_search s(pattern, current_path, program);
-            s.run(".");
-            if (chdir(current_path.c_str()) != 0) {
-              throw std::runtime_error("Failed to restore path");
-            }
+      if (std::filesystem::exists(std::filesystem::path(path) / ".git")) {
+        if (chdir(path.data()) == 0) {
+          static git_index_search s(pattern, current_path, program);
+          s.run(".");
+          if (chdir(current_path.c_str()) != 0) {
+            throw std::runtime_error("Failed to restore path");
           }
-        } else {
-          directory_search s(pattern, path, program);
-          s.run(path);
         }
+      } else {
+        directory_search s(pattern, path, program);
+        s.run(path);
       }
     }
   }
